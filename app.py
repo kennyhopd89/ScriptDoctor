@@ -7,6 +7,20 @@ import pandas as pd
 from dotenv import load_dotenv
 load_dotenv()
 
+# Helper function for auto-save
+def auto_save():
+    """Auto-save to both local storage and database (if enabled)"""
+    # Save to local storage
+    utils.save_session_state(st.session_state)
+    
+    # Save to database if enabled
+    try:
+        import database
+        if database.is_supabase_enabled() and st.session_state.get('current_project_id'):
+            database.save_current_project()
+    except Exception as e:
+        print(f"Database auto-save error: {e}")
+
 # Custom CSS for professional screenplay look with Glassmorphism
 def load_custom_css():
     """Load advanced CSS theme matching t.html reference design."""
@@ -586,18 +600,151 @@ with st.sidebar:
     st.markdown('<div class="sidebar-section">', unsafe_allow_html=True)
     st.markdown('<h2 class="sidebar-title">Quản lý Dự án</h2>', unsafe_allow_html=True)
     
-    # Load projects (dummy for now as requested, but logic ready)
-    projects_data = utils.load_json(utils.PROJECTS_FILE)
-    project_list = [p["name"] for p in projects_data.get("projects", [])]
+    # Try to import database module
+    try:
+        import database
+        supabase_enabled = database.is_supabase_enabled()
+    except Exception as e:
+        supabase_enabled = False
+        print(f"Database module error: {e}")
     
-    selected_project = st.selectbox(
-        "Chọn dự án",
-        options=project_list if project_list else ["(Chưa có dự án)"],
-        label_visibility="collapsed"
-    )
-    
-    if st.button("+ Tạo dự án mới", use_container_width=True, type="primary"):
-        st.info("Tính năng tạo dự án đang phát triển...")
+    if supabase_enabled:
+        # Load projects from Supabase
+        projects = database.get_projects()
+        
+        if projects:
+            # Create project options
+            project_options = {p['name']: p['id'] for p in projects}
+            project_names = list(project_options.keys())
+            
+            # Get current project index
+            current_project_id = st.session_state.get('current_project_id')
+            current_index = 0
+            if current_project_id:
+                for i, (name, pid) in enumerate(project_options.items()):
+                    if pid == current_project_id:
+                        current_index = i
+                        break
+            
+            # Project selector
+            selected_name = st.selectbox(
+                "Chọn dự án",
+                options=project_names,
+                index=current_index,
+                key="project_selector",
+                label_visibility="collapsed"
+            )
+            
+            # Load project when changed
+            if selected_name:
+                project_id = project_options[selected_name]
+                if st.session_state.get('current_project_id') != project_id:
+                    with st.spinner("Đang tải dự án..."):
+                        if database.load_project_to_session(project_id):
+                            st.success(f"Đã tải: {selected_name}")
+                            st.rerun()
+                        else:
+                            st.error("Lỗi tải dự án!")
+        else:
+            st.info("Chưa có dự án. Tạo dự án mới để bắt đầu!")
+        
+        # Create new project button
+        if st.button("+ Tạo dự án mới", use_container_width=True, type="primary"):
+            st.session_state['show_create_project_dialog'] = True
+        
+        # Create project dialog
+        if st.session_state.get('show_create_project_dialog'):
+            with st.form("create_project_form"):
+                st.markdown("#### Tạo dự án mới")
+                project_name = st.text_input("Tên dự án *", placeholder="VD: Heo Năm Móng - Draft 1")
+                project_desc = st.text_area("Mô tả (optional)", placeholder="Mô tả ngắn về dự án...")
+                
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.form_submit_button("✓ Tạo", use_container_width=True, type="primary"):
+                        if project_name:
+                            project = database.create_project(project_name, project_desc)
+                            if project:
+                                st.success(f"Đã tạo: {project_name}")
+                                st.session_state['show_create_project_dialog'] = False
+                                database.load_project_to_session(project['id'])
+                                st.rerun()
+                            else:
+                                st.error("Lỗi tạo dự án!")
+                        else:
+                            st.error("Vui lòng nhập tên dự án!")
+                
+                with col2:
+                    if st.form_submit_button("✗ Hủy", use_container_width=True):
+                        st.session_state['show_create_project_dialog'] = False
+                        st.rerun()
+        
+        # Project actions
+        if st.session_state.get('current_project_id'):
+            with st.expander("⚙️ Tùy chọn dự án"):
+                if st.button("💾 Lưu dự án", use_container_width=True):
+                    with st.spinner("Đang lưu..."):
+                        if database.save_current_project():
+                            st.success("Đã lưu!")
+                            st.toast("Dự án đã được lưu!", icon="✅")
+                        else:
+                            st.error("Lỗi lưu dự án!")
+                
+                st.markdown("---")
+                
+                if st.button("🗑️ Xóa dự án", use_container_width=True, type="secondary"):
+                    st.session_state['show_delete_confirm'] = True
+                
+                if st.session_state.get('show_delete_confirm'):
+                    st.warning("⚠️ Xóa dự án sẽ mất toàn bộ dữ liệu!")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("Xác nhận xóa", type="primary", use_container_width=True):
+                            project_id = st.session_state['current_project_id']
+                            project_name = st.session_state.get('current_project_name', 'dự án')
+                            if database.delete_project(project_id):
+                                st.success(f"Đã xóa: {project_name}")
+                                # Clear session
+                                for key in ['current_project_id', 'current_project_name', 'scene_list', 
+                                           'analysis_results', 'action_plan', 'user_strategy', 'task_completion']:
+                                    st.session_state.pop(key, None)
+                                st.session_state['show_delete_confirm'] = False
+                                st.rerun()
+                    with col2:
+                        if st.button("Hủy", use_container_width=True):
+                            st.session_state['show_delete_confirm'] = False
+                            st.rerun()
+    else:
+        # Fallback to local storage
+        st.warning("⚠️ Supabase chưa được cấu hình")
+        st.info("Đang dùng lưu trữ local (mất data khi restart)")
+        
+        # Show setup instructions
+        with st.expander("📖 Hướng dẫn setup Supabase"):
+            st.markdown("""
+            1. Đọc file `SUPABASE_SETUP.md`
+            2. Tạo Supabase account
+            3. Run SQL schema
+            4. Thêm keys vào `.streamlit/secrets.toml`:
+            ```toml
+            SUPABASE_URL = "your_url"
+            SUPABASE_KEY = "your_anon_key"
+            ```
+            5. Restart app
+            """)
+        
+        # Local storage fallback (old code)
+        projects_data = utils.load_json(utils.PROJECTS_FILE)
+        project_list = [p["name"] for p in projects_data.get("projects", [])]
+        
+        if project_list:
+            selected_project = st.selectbox(
+                "Chọn dự án (Local)",
+                options=project_list,
+                label_visibility="collapsed"
+            )
+        else:
+            st.caption("(Chưa có dự án local)")
     
     st.markdown('</div>', unsafe_allow_html=True)
     st.divider()
@@ -781,7 +928,7 @@ with tab1:
                     st.session_state['full_script_text_on_import'] = script_text
                     
                     # Auto-save after parsing
-                    utils.save_session_state(st.session_state)
+                    auto_save()
                     st.rerun() # Rerun to switch to the review mode
                     
                 except Exception as e:
@@ -829,7 +976,7 @@ with tab1:
                         # Save analysis report (for Action Plan to continue using the main report - Creative View)
                         st.session_state['analysis_report'] = results['creative']
                         
-                        utils.save_session_state(st.session_state)
+                        auto_save()
                         
                         st.success("Đã hoàn tất phân tích lại dưới góc nhìn kép!")
                         
@@ -994,7 +1141,7 @@ with tab2:
                             st.session_state['original_content_map'][scene['id']] = current_saved_content
                         break
                 
-                utils.save_session_state(st.session_state)
+                auto_save()
                 st.toast("Đã lưu nội dung cảnh! ✅")
             
             # Undo button
@@ -1311,7 +1458,7 @@ with tab3:
                         st.session_state['user_strategy'] = user_strategy
                         st.session_state['task_completion'] = {} # New tracking for completion
                         
-                        utils.save_session_state(st.session_state)
+                        auto_save()
                         
                         st.success("Đã lập kế hoạch thành công!")
                     except Exception as e:
