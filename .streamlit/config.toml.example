@@ -1,0 +1,19 @@
+# Streamlit Configuration Example
+# Copy this to .streamlit/config.toml for local development
+# For production, these settings are managed by Streamlit Cloud
+
+[theme]
+primaryColor = "#00B8D4"
+backgroundColor = "#0A0E1A"
+secondaryBackgroundColor = "#1A1F2E"
+textColor = "#FFFFFF"
+font = "sans serif"
+
+[server]
+headless = true
+port = 8501
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false

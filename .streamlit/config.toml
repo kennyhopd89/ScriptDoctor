@@ -1,0 +1,26 @@
+[general]
+email = ""
+
+[client]
+toolbarMode = "minimal"
+showErrorDetails = true
+
+[runner]
+magicEnabled = true
+fastReruns = true
+
+[server]
+port = 8501
+enableCORS = false
+enableXsrfProtection = true
+maxUploadSize = 200
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+primaryColor = "#00B8D4"
+backgroundColor = "#0A0E1A"
+secondaryBackgroundColor = "#1A1F2E"
+textColor = "#FFFFFF"
+font = "sans serif"
